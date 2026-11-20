@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crypto Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #E6E9ED; --panel: #FBFCFD; --ink: #18212B; --muted: #5A6673; --rule: #CBD2D9;
+    --accent: #2B3FD6; --accent-ink: #FFFFFF; --ok: #1F7A4D; --bad: #B42318; --well: #F0F2F5;
+    --sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+    --mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12171D; --panel: #1A2129; --ink: #E4E8EC; --muted: #93A0AD; --rule: #2E3843;
+      --accent: #8C9BFF; --accent-ink: #0E1430; --ok: #4CC38A; --bad: #F97066; --well: #141A21;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--sans); }
+
+  .app { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+
+  /* rail */
+  .rail { padding: 32px 20px; display: flex; flex-direction: column; gap: 28px; }
+  .brand { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  .brand + p { margin: 4px 0 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
+  [role=tablist] { display: flex; flex-direction: column; gap: 2px; }
+  [role=tab] {
+    font: 600 16px var(--sans); color: var(--muted); background: none; border: 0; text-align: left;
+    padding: 9px 12px; border-left: 3px solid transparent; cursor: pointer;
+  }
+  [role=tab]:hover { color: var(--ink); }
+  [role=tab][aria-selected=true] { color: var(--ink); border-left-color: var(--accent); }
+  .rail .fine { margin-top: auto; font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+  /* workspace */
+  .work { background: var(--panel); padding: 40px 48px 56px; border-left: 1px solid var(--rule); }
+  [role=tabpanel] { max-width: 68ch; }
+  h2 { font-size: 28px; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 6px; }
+  h2 + p { color: var(--muted); margin: 0 0 28px; }
+
+  .field { display: block; margin-bottom: 20px; }
+  .field > span, legend { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .field small { font-weight: 400; color: var(--muted); }
+  textarea, input[type=text], input[type=password] {
+    width: 100%; font: 15px/1.5 var(--mono); color: var(--ink); background: var(--well);
+    border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px;
+  }
+  textarea { min-height: 96px; resize: vertical; }
+
+  fieldset.choice { border: 0; padding: 0; margin: 0 0 20px; }
+  .choice .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .choice span {
+    display: inline-block; padding: 6px 12px; border: 1px solid var(--rule); border-radius: 4px;
+    font: 14px var(--mono); cursor: pointer; color: var(--muted);
+  }
+  .choice input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+  .choice input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 32px; }
+  button { font: 600 15px var(--sans); cursor: pointer; border-radius: 4px; }
+  .primary { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); padding: 9px 18px; }
+  .secondary { background: transparent; color: var(--ink); border: 1px solid var(--rule); padding: 9px 18px; }
+  .secondary:hover { border-color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* results */
+  .out { border-top: 1px solid var(--rule); padding-top: 20px; }
+  .out:empty { display: none; }
+  .result { margin-bottom: 22px; }
+  .result-label { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .result pre {
+    margin: 0; padding: 12px 14px; background: var(--well); border: 1px solid var(--rule); border-radius: 4px;
+    font: 14px/1.6 var(--mono); white-space: pre-wrap; word-break: break-all; user-select: all;
+  }
+  .fingerprint { display: flex; height: 10px; margin-top: 6px; border-radius: 2px; overflow: hidden; }
+  .fingerprint span { flex: 1; }
+  .copy { margin-top: 8px; background: none; border: 0; padding: 2px 0; color: var(--accent); font-size: 14px; }
+  .copy:hover { text-decoration: underline; }
+  .note { margin: 0 0 10px; padding-left: 26px; position: relative; }
+  .note::before { position: absolute; left: 0; width: 18px; text-align: center; font-weight: 700; }
+  .note.ok::before { content: "✓"; color: var(--ok); }
+  .note.bad::before { content: "✗"; color: var(--bad); }
+  .note.bad { color: var(--bad); }
+  .note.busy { color: var(--muted); }
+  #test-out .note:first-child { font-weight: 700; font-size: 18px; margin-bottom: 18px; }
+
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; }
+    .rail { padding: 20px 16px 0; gap: 14px; }
+    [role=tablist] { flex-direction: row; overflow-x: auto; border-bottom: 1px solid var(--rule); }
+    [role=tab] { border-left: 0; border-bottom: 3px solid transparent; padding: 8px 12px; white-space: nowrap; }
+    [role=tab][aria-selected=true] { border-bottom-color: var(--accent); }
+    .rail .fine { display: none; }
+    .work { border-left: 0; padding: 24px 16px 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <div>
+      <h1 class="brand">Crypto Lab</h1>
+      <p>Hash, encrypt and generate keys in your browser.</p>
+    </div>
+    <div role="tablist" aria-label="Tools" aria-orientation="vertical">
+      <button role="tab" id="tab-hash" aria-controls="p-hash" aria-selected="true">Hash</button>
+      <button role="tab" id="tab-enc" aria-controls="p-enc" aria-selected="false">Encrypt</button>
+      <button role="tab" id="tab-keys" aria-controls="p-keys" aria-selected="false">Keys</button>
+      <button role="tab" id="tab-test" aria-controls="p-test" aria-selected="false">Self-test</button>
+    </div>
+    <p class="fine">Everything runs in your browser. Generated keys appear on screen, so use them for testing only.</p>
+  </nav>
+
+  <main class="work">
+    <section role="tabpanel" id="p-hash" aria-labelledby="tab-hash">
+      <h2>Hash</h2>
+      <p>Get the digest of some text, or an HMAC if you add a key. Compare checks Web Crypto against a second, independent implementation.</p>
+      <label class="field"><span>Text</span><textarea id="hash-in">hello world</textarea></label>
+      <fieldset class="choice"><legend>Algorithm</legend><div class="opts">
+        <label><input type="radio" name="hash-alg" value="SHA-256" checked><span>SHA-256</span></label>
+        <label><input type="radio" name="hash-alg" value="SHA-384"><span>SHA-384</span></label>
+        <label><input type="radio" name="hash-alg" value="SHA-512"><span>SHA-512</span></label>
+        <label><input type="radio" name="hash-alg" value="SHA-1"><span>SHA-1</span></label>
+        <label><input type="radio" name="hash-alg" value="MD5"><span>MD5</span></label>
+      </div></fieldset>
+      <label class="field"><span>HMAC key <small>(optional)</small></span><input type="text" id="hmac-key" autocomplete="off"></label>
+      <div class="actions">
+        <button class="primary" id="hash-btn">Hash</button>
+        <button class="secondary" id="cross-btn">Compare implementations</button>
+      </div>
+      <div class="out" id="hash-out" aria-live="polite"></div>
+    </section>
+
+    <section role="tabpanel" id="p-enc" aria-labelledby="tab-enc" hidden>
+      <h2>Encrypt</h2>
+      <p>AES-256-GCM with a key derived from your password (PBKDF2, 210,000 rounds). To decrypt, paste the base64 output back in with the same password.</p>
+      <label class="field"><span>Text or ciphertext</span><textarea id="enc-in">my secret message</textarea></label>
+      <label class="field"><span>Password</span><input type="password" id="enc-pw" value="correct horse" autocomplete="off"></label>
+      <div class="actions">
+        <button class="primary" id="enc-btn">Encrypt</button>
+        <button class="secondary" id="dec-btn">Decrypt</button>
+        <button class="secondary" id="enc-use" hidden>Move result to input</button>
+      </div>
+      <div class="out" id="enc-out" aria-live="polite"></div>
+    </section>
+
+    <section role="tabpanel" id="p-keys" aria-labelledby="tab-keys" hidden>
+      <h2>Keys</h2>
+      <p>Generate a fresh key. Secret keys come as hex and base64, key pairs as PEM (SPKI public, PKCS#8 private).</p>
+      <fieldset class="choice"><legend>Key type</legend><div class="opts">
+        <label><input type="radio" name="key-alg" value="AES-GCM-256" checked><span>AES-GCM 256</span></label>
+        <label><input type="radio" name="key-alg" value="HMAC-SHA-256"><span>HMAC SHA-256</span></label>
+        <label><input type="radio" name="key-alg" value="RSA-OAEP-2048"><span>RSA-OAEP 2048</span></label>
+        <label><input type="radio" name="key-alg" value="RSA-PSS-2048"><span>RSA-PSS 2048</span></label>
+        <label><input type="radio" name="key-alg" value="ECDSA-P-256"><span>ECDSA P-256</span></label>
+        <label><input type="radio" name="key-alg" value="Ed25519"><span>Ed25519</span></label>
+      </div></fieldset>
+      <div class="actions"><button class="primary" id="key-btn">Generate key</button></div>
+      <div class="out" id="key-out" aria-live="polite"></div>
+    </section>
+
+    <section role="tabpanel" id="p-test" aria-labelledby="tab-test" hidden>
+      <h2>Self-test</h2>
+      <p>Checks this browser against published test vectors, encryption round-trips and signature verification.</p>
+      <div class="actions"><button class="primary" id="test-btn">Run tests</button></div>
+      <div class="out" id="test-out" aria-live="polite"></div>
+    </section>
+  </main>
+</div>
+<script src="js/main.js"></script>
+</body>
+</html>
