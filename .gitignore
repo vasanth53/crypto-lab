@@ -2,3 +2,4 @@
 .shadow-cljs/
 resources/public/js/
 .playwright-mcp/
+out/

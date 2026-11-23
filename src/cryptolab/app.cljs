@@ -1,128 +1,15 @@
 (ns cryptolab.app
+  "DOM wiring only. The crypto lives in cryptolab.core."
   (:require [clojure.string :as str]
-            [goog.crypt :as gcrypt])
-  (:import [goog.crypt Md5 Sha1 Sha256 Sha384 Sha512]))
+            [cryptolab.core :as c]))
 
-(def ^js subtle (.-subtle js/crypto))
-(def ^js enc (js/TextEncoder.))
-(def ^js decoder (js/TextDecoder.))
-
-;; ---- byte helpers ----
-(defn bytes-of [buf] (js/Array.from (js/Uint8Array. buf)))
-(defn hex [buf] (apply str (map #(.padStart (.toString % 16) 2 "0") (bytes-of buf))))
-(defn b64 [buf] (js/btoa (apply str (map char (bytes-of buf)))))
-(defn unb64 [s] (js/Uint8Array.from (js/atob (str/trim s)) #(.charCodeAt % 0)))
-(defn rand-bytes [n] (.getRandomValues js/crypto (js/Uint8Array. n)))
-(defn concat-bytes [& arrs]
-  (let [out (js/Uint8Array. (reduce + (map #(.-length %) arrs)))]
-    (reduce (fn [off ^js a] (.set out a off) (+ off (.-length a))) 0 arrs)
-    out))
-(defn pem [label buf]
-  (str "-----BEGIN " label "-----\n" (str/join "\n" (re-seq #".{1,64}" (b64 buf))) "\n-----END " label "-----"))
-
-;; ---- hashing ----
-(defn browser-hash [alg text hmac-key]
-  (if (str/blank? hmac-key)
-    (-> (.digest subtle alg (.encode enc text)) (.then hex))
-    (-> (.importKey subtle "raw" (.encode enc hmac-key) #js {:name "HMAC" :hash alg} false #js ["sign"])
-        (.then #(.sign subtle "HMAC" % (.encode enc text)))
-        (.then hex))))
-
-;; Google Closure's pure-JS hashes: MD5 (which Web Crypto lacks) and an independent implementation to compare against
-(def closure-hashers {"MD5" #(Md5.) "SHA-1" #(Sha1.) "SHA-256" #(Sha256.) "SHA-384" #(Sha384.) "SHA-512" #(Sha512.)})
-(defn closure-hash [alg text]
-  (let [^js h ((closure-hashers alg))]
-    (.update h (gcrypt/stringToUtf8ByteArray text))
-    (gcrypt/byteArrayToHex (.digest h))))
-
-(defn reference-hash
-  "Resolves to [hex source-name], computed by Closure rather than Web Crypto."
-  [alg text]
-  (js/Promise.resolve [(closure-hash alg text) "the Closure library"]))
-
-;; ---- password encryption: AES-256-GCM, key from PBKDF2-SHA256; output = base64(salt16 | iv12 | ciphertext) ----
-(defn derive-key [pw salt]
-  (-> (.importKey subtle "raw" (.encode enc pw) "PBKDF2" false #js ["deriveKey"])
-      (.then #(.deriveKey subtle #js {:name "PBKDF2" :salt salt :iterations 210000 :hash "SHA-256"}
-                          % #js {:name "AES-GCM" :length 256} false #js ["encrypt" "decrypt"]))))
-
-(defn encrypt [pw text]
-  (let [salt (rand-bytes 16) iv (rand-bytes 12)]
-    (-> (derive-key pw salt)
-        (.then #(.encrypt subtle #js {:name "AES-GCM" :iv iv} % (.encode enc text)))
-        (.then #(b64 (concat-bytes salt iv (js/Uint8Array. %)))))))
-
-(defn decrypt [pw data]
-  (let [b (unb64 data)]
-    (-> (derive-key pw (.slice b 0 16))
-        (.then #(.decrypt subtle #js {:name "AES-GCM" :iv (.slice b 16 28)} % (.slice b 28)))
-        (.then #(.decode decoder %))
-        (.catch #(throw (js/Error. "decryption failed: wrong password or corrupted data"))))))
-
-;; ---- key generation ----
-(def key-specs
-  {"AES-GCM-256"   [#js {:name "AES-GCM" :length 256} #js ["encrypt" "decrypt"]]
-   "HMAC-SHA-256"  [#js {:name "HMAC" :hash "SHA-256"} #js ["sign" "verify"]]
-   "RSA-OAEP-2048" [#js {:name "RSA-OAEP" :modulusLength 2048 :publicExponent (js/Uint8Array. #js [1 0 1]) :hash "SHA-256"} #js ["encrypt" "decrypt"]]
-   "RSA-PSS-2048"  [#js {:name "RSA-PSS" :modulusLength 2048 :publicExponent (js/Uint8Array. #js [1 0 1]) :hash "SHA-256"} #js ["sign" "verify"]]
-   "ECDSA-P-256"   [#js {:name "ECDSA" :namedCurve "P-256"} #js ["sign" "verify"]]
-   "Ed25519"       [#js {:name "Ed25519"} #js ["sign" "verify"]]})
-
-(defn gen-key [kind]
-  (let [[alg usages] (key-specs kind)] (.generateKey subtle alg true usages)))
-
-(defn export-key [^js k]
-  (if (.-privateKey k)
-    (-> (js/Promise.all #js [(.exportKey subtle "spki" (.-publicKey k)) (.exportKey subtle "pkcs8" (.-privateKey k))])
-        (.then (fn [[pub priv]] [["Public key (PEM)" (pem "PUBLIC KEY" pub)] ["Private key (PEM)" (pem "PRIVATE KEY" priv)]])))
-    (-> (.exportKey subtle "raw" k)
-        (.then #(vector ["Key (hex)" (hex %)] ["Key (base64)" (b64 %)])))))
-
-;; ---- self-tests ----
-(def tests
-  [["SHA-256 'abc' (FIPS 180 vector)"
-    #(-> (browser-hash "SHA-256" "abc" "") (.then (partial = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")))]
-   ["SHA-1 'abc' (FIPS 180 vector)"
-    #(-> (browser-hash "SHA-1" "abc" "") (.then (partial = "a9993e364706816aba3e25717850c26c9cd0d89d")))]
-   ["HMAC-SHA-256 (RFC 4231 case 2)"
-    #(-> (browser-hash "SHA-256" "what do ya want for nothing?" "Jefe")
-         (.then (partial = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843")))]
-   ["MD5 'abc' (RFC 1321 vector)"
-    #(-> (reference-hash "MD5" "abc") (.then (fn [[h]] (= h "900150983cd24fb0d6963f7d28e17f72"))))]
-   ["Web Crypto and the reference implementation agree on SHA-512 of unicode text"
-    #(let [t (str "héllo 🔐 " (hex (rand-bytes 8)))]
-       (-> (js/Promise.all #js [(browser-hash "SHA-512" t "") (reference-hash "SHA-512" t)])
-           (.then (fn [[a [b]]] (= a b)))))]
-   ["AES-GCM password encrypt -> decrypt round-trip"
-    #(-> (encrypt "pw" "secret ✓") (.then (partial decrypt "pw")) (.then (partial = "secret ✓")))]
-   ["AES-GCM rejects wrong password"
-    #(-> (encrypt "pw" "x") (.then (partial decrypt "nope")) (.then (constantly false) (constantly true)))]
-   ["RSA-OAEP encrypt -> decrypt round-trip"
-    (fn [] (-> (gen-key "RSA-OAEP-2048")
-               (.then (fn [^js kp]
-                        (-> (.encrypt subtle #js {:name "RSA-OAEP"} (.-publicKey kp) (.encode enc "hi"))
-                            (.then #(.decrypt subtle #js {:name "RSA-OAEP"} (.-privateKey kp) %))
-                            (.then #(= "hi" (.decode decoder %))))))))]
-   ["ECDSA signature verifies, tampered message does not"
-    #(let [alg #js {:name "ECDSA" :hash "SHA-256"}]
-       (-> (gen-key "ECDSA-P-256")
-           (.then (fn [^js kp]
-                    (-> (.sign subtle alg (.-privateKey kp) (.encode enc "msg"))
-                        (.then (fn [sig]
-                                 (js/Promise.all #js [(.verify subtle alg (.-publicKey kp) sig (.encode enc "msg"))
-                                                      (.verify subtle alg (.-publicKey kp) sig (.encode enc "msG"))])))
-                        (.then (fn [[good bad]] (and good (not bad)))))))))]])
-
-;; returns {:note name :ok bool}; a thrown error counts as a failure
-(defn run-test [[name t]]
-  (-> (js/Promise.resolve) (.then t)
-      (.then #(hash-map :note name :ok (true? %))
-             #(hash-map :note (str name ": " (or (.-message %) %)) :ok false))))
-
-;; ---- DOM wiring ----
 (defn $ [id] (.getElementById js/document id))
 (defn value [id] (.-value ($ id)))
+(defn set-value! [id v] (set! (.-value ($ id)) v))
 (defn picked [group] (.-value (.querySelector js/document (str "input[name='" group "']:checked"))))
+(defn picked-file [id] (aget (.-files ($ id)) 0))
+(defn on [id event f] (.addEventListener ($ id) event f))
+(defn fail [msg] (throw (js/Error. msg)))
 
 (defn el [tag cls text]
   (let [e (.createElement js/document tag)]
@@ -155,11 +42,20 @@
   (set! (.-textContent e) "")
   (doseq [it items] (.append e (if (map? it) (note it) (block it)))))
 
-(defn show! [id p]
-  (render! ($ id) [{:note "Working…" :busy true}])
-  (-> p (.then #(render! ($ id) %))
-      (.catch #(render! ($ id) [{:note (str (or (.-message %) %)) :ok false}]))))
-(defn on-click [id f] (.addEventListener ($ id) "click" f))
+(defonce latest (atom {}))
+
+(defn show!
+  "Renders what `f` returns (items, or a promise of them) into the output `id`; an error becomes a red line.
+  Live fields call this on every keystroke, so a result that is no longer the newest for `id` is dropped."
+  [id f]
+  (let [n (get (swap! latest update id (fnil inc 0)) id)
+        put! #(when (= n (@latest id)) (render! ($ id) %))]
+    (put! [{:note "Working…" :busy true}])
+    (-> (js/Promise.resolve) (.then f) (.then put!)
+        (.catch #(put! [{:note (str (or (.-message %) %)) :ok false}])))))
+
+(defn debounced [f]
+  (let [t (atom nil)] (fn [] (js/clearTimeout @t) (reset! t (js/setTimeout f 250)))))
 
 (defn flash! [^js btn msg]
   (set! (.-textContent btn) msg)
@@ -175,41 +71,170 @@
       (.setAttribute t "aria-selected" (str on))
       (set! (.-hidden ($ (.getAttribute t "aria-controls"))) (not on)))))
 
+;; ---- files ----
+(defn size-label [n]
+  (cond (< n 1024) (str n " bytes")
+        (< n 1048576) (str (.toFixed (/ n 1024) 1) " KB")
+        :else (str (.toFixed (/ n 1048576) 1) " MB")))
+
+;; the drop zone's label names the chosen file, or goes back to its prompt (kept in data-prompt)
+(defn label-file! [id ^js f]
+  (let [^js e ($ id)]
+    (set! (.-textContent e) (if f (str (.-name f) " (" (size-label (.-size f)) ")") (.getAttribute e "data-prompt")))))
+
+(defn read-file [^js f]
+  (.catch (.arrayBuffer f) #(fail "This file couldn't be read. It may be too large for the browser.")))
+
+(defn download! [data fname]
+  (let [url (js/URL.createObjectURL (js/Blob. #js [data])) ^js a (el "a" "" nil)]
+    (set! (.-href a) url)
+    (set! (.-download a) fname)
+    (.click a)
+    (js/setTimeout #(js/URL.revokeObjectURL url) 1000)))
+
+;; ---- Check a file ----
+(defonce check-src (atom nil)) ; a File or a string, whichever the person gave last
+
+(defn check! []
+  (let [src @check-src
+        text? (string? src)
+        expected (value "check-expected")
+        alg (if (str/blank? expected) "SHA-256" (c/checksum-alg expected))]
+    (show! "check-out"
+           (fn []
+             (cond
+               (or (nil? src) (= "" src)) []
+               (nil? alg) (fail "That doesn't look like a checksum. Paste the long string of letters and numbers from the download page.")
+               :else
+               (-> (js/Promise.resolve (if text? src (read-file src)))
+                   (.then #(c/digest alg %))
+                   (.then (fn [h]
+                            (let [thing (if text? "text" "file")
+                                  result [(str alg " checksum of " (if text? "your text" (.-name ^js src))) h]]
+                              (cond
+                                (str/blank? expected) [result]
+                                (= h (c/clean-checksum expected)) [{:note (str "Match. This is exactly the " thing " the checksum describes.") :ok true} result]
+                                :else [{:note (str "Different. This is not the " thing " the checksum describes, so don't trust it.") :ok false} result]))))))))))
+
+;; ---- Lock a message ----
+(defn unlocked-name [n]
+  (if (str/ends-with? n ".locked") (subs n 0 (- (count n) (count ".locked"))) (str "unlocked-" n)))
+
+(defn crypt-clicked [lock?]
+  (set! (.-hidden ($ "enc-use")) true)
+  (let [pw (value "enc-pw") text (value "enc-in") ^js f (picked-file "lock-file")]
+    (show! "enc-out"
+           (fn []
+             (cond
+               (= "" pw) (fail "Enter a password first.")
+               f (-> (read-file f)
+                     (.then #((if lock? c/lock-file c/unlock-file) pw %))
+                     (.then (fn [out]
+                              (let [fname (if lock? (str (.-name f) ".locked") (unlocked-name (.-name f)))]
+                                (download! out fname)
+                                [{:note (str "Done. Downloaded as " fname) :ok true}]))))
+               (str/blank? text) (fail "Type a message or choose a file first.")
+               :else (-> ((if lock? c/encrypt c/decrypt) pw text)
+                         (.then (fn [r]
+                                  (set! (.-hidden ($ "enc-use")) false)
+                                  [[(if lock? "Locked text. Copy it and send it; share the password another way." "Unlocked message") r]]))))))))
+
+(defn lock-file-changed []
+  (let [f (picked-file "lock-file")]
+    (label-file! "lock-name" f)
+    (set! (.-hidden ($ "lock-clear")) (nil? f))))
+
+;; ---- Sign & verify ----
+(defn make-keys-clicked []
+  (show! "sig-out"
+         #(-> (c/gen-key "ECDSA-P-256") (.then c/export-key)
+              (.then (fn [[[_ pub] [_ priv]]]
+                       (set-value! "sig-pub" pub)
+                       (set-value! "sig-priv" priv)
+                       [{:note "New key pair made. Keep the private key secret; give the public key to anyone." :ok true}])))))
+
+(defn sign-clicked []
+  (show! "sig-out"
+         #(-> (c/sign (value "sig-priv") (value "sig-msg"))
+              (.then (fn [sig]
+                       (set-value! "sig-sig" sig)
+                       [{:note "Signed. Send the message, the signature and your public key." :ok true}])))))
+
+(defn verify-clicked []
+  (show! "sig-out"
+         #(-> (c/verify (value "sig-pub") (value "sig-msg") (value "sig-sig"))
+              (.then (fn [ok]
+                       [{:note (if ok "Valid. The owner of this public key signed exactly this message."
+                                   "Not valid. The message, the signature or the key doesn't match.")
+                         :ok ok}])))))
+
+;; ---- Convert ----
+(def conv-ids {"text" "conv-text" "hex" "conv-hex" "base64" "conv-b64"})
+
+(defn conv-changed [fmt]
+  (let [r (try (c/convert fmt (value (conv-ids fmt))) (catch :default _ nil))]
+    (doseq [[f id] conv-ids]
+      (.setAttribute ($ id) "aria-invalid" (str (and (nil? r) (= f fmt))))
+      (when (and r (not= f fmt)) (set-value! id (or (r f) ""))))
+    (render! ($ "conv-out")
+             (cond (nil? r) [{:note (str "That isn't valid " fmt ", so the other boxes were left as they were.") :ok false}]
+                   (nil? (r "text")) [{:note "These bytes aren't readable text, so the text box is empty."}]
+                   :else []))))
+
+;; ---- Advanced ----
 (defn hash-clicked []
   (let [alg (picked "hash-alg") text (value "hash-in") k (value "hmac-key")]
     (show! "hash-out"
-           (cond (and (= alg "MD5") (str/blank? k)) (.then (reference-hash alg text) (fn [[h src]] [[(str "MD5, computed by " src) h]]))
-                 (= alg "MD5") (js/Promise.reject (js/Error. "HMAC with MD5 isn't supported. Clear the HMAC key or pick a SHA algorithm."))
-                 :else (.then (browser-hash alg text k) #(vector [(if (str/blank? k) alg (str "HMAC-" alg)) %]))))))
+           #(cond (str/blank? k) (.then (c/digest alg text) (fn [h] [[alg h]]))
+                  (= alg "MD5") (fail "HMAC with MD5 isn't supported. Clear the HMAC key or pick a SHA algorithm.")
+                  :else (.then (c/browser-hash alg text k) (fn [h] [[(str "HMAC-" alg) h]]))))))
 
 (defn compare-clicked []
   (let [alg (picked "hash-alg") text (value "hash-in")]
     (show! "hash-out"
-           (if (= alg "MD5")
-             (js/Promise.reject (js/Error. "Web Crypto has no MD5, so there's nothing to compare. Pick a SHA algorithm."))
-             (-> (js/Promise.all #js [(browser-hash alg text "") (reference-hash alg text)])
-                 (.then (fn [[a [b src]]] [{:note (if (= a b) "Both hashes match" "The hashes differ") :ok (= a b)}
-                                           [(str alg " from Web Crypto") a]
-                                           [(str alg " from " src) b]])))))))
+           #(if (= alg "MD5")
+              (fail "Web Crypto has no MD5, so there's nothing to compare. Pick a SHA algorithm.")
+              (-> (js/Promise.all #js [(c/browser-hash alg text "") (c/reference-hash alg text)])
+                  (.then (fn [[a [b src]]] [{:note (if (= a b) "Both hashes match" "The hashes differ") :ok (= a b)}
+                                            [(str alg " from Web Crypto") a]
+                                            [(str alg " from " src) b]])))))))
 
-(defn crypt-clicked [f label]
-  (set! (.-hidden ($ "enc-use")) true)
-  (show! "enc-out" (-> (f (value "enc-pw") (value "enc-in"))
-                       (.then (fn [r] (set! (.-hidden ($ "enc-use")) false) [[label r]])))))
+(defn tests-clicked []
+  (show! "test-out"
+         #(-> (js/Promise.all (into-array (map c/run-test c/tests)))
+              (.then (fn [rs]
+                       (let [ran (remove (comp nil? :ok) rs) n (count (filter :ok ran))]
+                         (into [{:note (str n " of " (count ran) " tests passed") :ok (= n (count ran))}] rs)))))))
 
 (defn init []
   (.addEventListener js/document "click"
                      (fn [^js e]
                        (when-let [b (.closest (.-target e) ".copy")] (copy! b))
                        (when-let [t (.closest (.-target e) "[role=tab]")] (select-tab! t))))
-  (on-click "enc-use" #(set! (.-value ($ "enc-in")) (.-textContent (.querySelector ($ "enc-out") "pre"))))
-  (on-click "hash-btn" hash-clicked)
-  (on-click "cross-btn" compare-clicked)
-  (on-click "enc-btn" #(crypt-clicked encrypt "Encrypted text (base64)"))
-  (on-click "dec-btn" #(crypt-clicked decrypt "Decrypted text"))
-  (on-click "key-btn" #(show! "key-out" (-> (gen-key (picked "key-alg")) (.then export-key))))
-  (on-click "test-btn" #(show! "test-out"
-                               (-> (js/Promise.all (into-array (map run-test tests)))
-                                   (.then (fn [rs]
-                                            (let [n (count (filter :ok rs))]
-                                              (into [{:note (str n " of " (count rs) " tests passed") :ok (= n (count rs))}] rs))))))))
+
+  (on "check-file" "change" #(when-let [f (picked-file "check-file")]
+                               (reset! check-src f)
+                               (label-file! "check-name" f)
+                               (check!)))
+  (on "check-text" "input" (debounced #(do (reset! check-src (value "check-text"))
+                                           (set-value! "check-file" "")
+                                           (label-file! "check-name" nil)
+                                           (check!))))
+  (on "check-expected" "input" (debounced check!))
+
+  (on "lock-file" "change" lock-file-changed)
+  (on "lock-clear" "click" #(do (set-value! "lock-file" "") (lock-file-changed)))
+  (on "enc-btn" "click" #(crypt-clicked true))
+  (on "dec-btn" "click" #(crypt-clicked false))
+  (on "enc-use" "click" #(set-value! "enc-in" (.-textContent (.querySelector ($ "enc-out") "pre"))))
+
+  (on "sig-gen" "click" make-keys-clicked)
+  (on "sig-sign" "click" sign-clicked)
+  (on "sig-verify" "click" verify-clicked)
+
+  (doseq [[fmt id] conv-ids] (on id "input" #(conv-changed fmt)))
+
+  (on "hash-btn" "click" hash-clicked)
+  (on "cross-btn" "click" compare-clicked)
+  (on "key-btn" "click" #(show! "key-out" (fn [] (-> (c/gen-key (picked "key-alg")) (.then c/export-key)))))
+  (on "test-btn" "click" tests-clicked))

@@ -35,6 +35,10 @@ jobs:
             ~/.m2/repository
             ~/.gitlibs
           key: deps-${{ hashFiles('deps.edn') }}
+      - name: Test
+        run: |
+          clojure -M:cljs -m shadow.cljs.devtools.cli compile test
+          node out/test.js
       - run: clojure -M:cljs -m shadow.cljs.devtools.cli release app
       - uses: actions/upload-pages-artifact@v5
         with:

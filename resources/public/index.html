@@ -48,10 +48,25 @@
   .field > span, legend { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
   .field small { font-weight: 400; color: var(--muted); }
   textarea, input[type=text], input[type=password] {
-    width: 100%; font: 15px/1.5 var(--mono); color: var(--ink); background: var(--well);
+    width: 100%; font: 16px/1.5 var(--mono); color: var(--ink); background: var(--well);
     border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px;
   }
   textarea { min-height: 96px; resize: vertical; }
+  [aria-invalid=true] { border-color: var(--bad); }
+
+  /* the file input covers the whole zone, so native click, keyboard and drop all work */
+  .drop {
+    position: relative; display: block; margin-bottom: 20px; padding: 28px 16px; text-align: center;
+    border: 2px dashed var(--rule); border-radius: 6px; color: var(--muted); overflow-wrap: anywhere;
+  }
+  .drop:hover { border-color: var(--ink); color: var(--ink); }
+  .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  details { margin-bottom: 20px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+  h3 { font-size: 20px; margin: 0 0 6px; }
+  h3 + p { color: var(--muted); margin: 0 0 20px; }
+  .group + .group { border-top: 1px solid var(--rule); margin-top: 40px; padding-top: 32px; }
 
   fieldset.choice { border: 0; padding: 0; margin: 0 0 20px; }
   .choice .opts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -92,7 +107,7 @@
   #test-out .note:first-child { font-weight: 700; font-size: 18px; margin-bottom: 18px; }
 
   @media (max-width: 760px) {
-    .app { grid-template-columns: 1fr; }
+    .app { grid-template-columns: minmax(0, 1fr); } /* 0 minimum, so the tab row scrolls instead of widening the page */
     .rail { padding: 20px 16px 0; gap: 14px; }
     [role=tablist] { flex-direction: row; overflow-x: auto; border-bottom: 1px solid var(--rule); }
     [role=tab] { border-left: 0; border-bottom: 3px solid transparent; padding: 8px 12px; white-space: nowrap; }
@@ -107,70 +122,113 @@
   <nav class="rail">
     <div>
       <h1 class="brand">Crypto Lab</h1>
-      <p>Hash, encrypt and generate keys in your browser.</p>
+      <p>Check downloads, lock messages and sign things, right in your browser.</p>
     </div>
     <div role="tablist" aria-label="Tools" aria-orientation="vertical">
-      <button role="tab" id="tab-hash" aria-controls="p-hash" aria-selected="true">Hash</button>
-      <button role="tab" id="tab-enc" aria-controls="p-enc" aria-selected="false">Encrypt</button>
-      <button role="tab" id="tab-keys" aria-controls="p-keys" aria-selected="false">Keys</button>
-      <button role="tab" id="tab-test" aria-controls="p-test" aria-selected="false">Self-test</button>
+      <button role="tab" id="tab-check" aria-controls="p-check" aria-selected="true">Check a file</button>
+      <button role="tab" id="tab-lock" aria-controls="p-lock" aria-selected="false">Lock a message</button>
+      <button role="tab" id="tab-sign" aria-controls="p-sign" aria-selected="false">Sign &amp; verify</button>
+      <button role="tab" id="tab-conv" aria-controls="p-conv" aria-selected="false">Convert</button>
+      <button role="tab" id="tab-adv" aria-controls="p-adv" aria-selected="false">Advanced</button>
     </div>
-    <p class="fine">Everything runs in your browser. Generated keys appear on screen, so use them for testing only.</p>
+    <p class="fine">Nothing you type or drop here leaves your browser. Keys made here appear on screen, so use them for testing only.</p>
   </nav>
 
   <main class="work">
-    <section role="tabpanel" id="p-hash" aria-labelledby="tab-hash">
-      <h2>Hash</h2>
-      <p>Get the digest of some text, or an HMAC if you add a key. Compare checks Web Crypto against a second, independent implementation.</p>
-      <label class="field"><span>Text</span><textarea id="hash-in">hello world</textarea></label>
-      <fieldset class="choice"><legend>Algorithm</legend><div class="opts">
-        <label><input type="radio" name="hash-alg" value="SHA-256" checked><span>SHA-256</span></label>
-        <label><input type="radio" name="hash-alg" value="SHA-384"><span>SHA-384</span></label>
-        <label><input type="radio" name="hash-alg" value="SHA-512"><span>SHA-512</span></label>
-        <label><input type="radio" name="hash-alg" value="SHA-1"><span>SHA-1</span></label>
-        <label><input type="radio" name="hash-alg" value="MD5"><span>MD5</span></label>
-      </div></fieldset>
-      <label class="field"><span>HMAC key <small>(optional)</small></span><input type="text" id="hmac-key" autocomplete="off"></label>
-      <div class="actions">
-        <button class="primary" id="hash-btn">Hash</button>
-        <button class="secondary" id="cross-btn">Compare implementations</button>
-      </div>
-      <div class="out" id="hash-out" aria-live="polite"></div>
+    <section role="tabpanel" id="p-check" aria-labelledby="tab-check">
+      <h2>Check a file</h2>
+      <p>Make sure a download is the real thing. Choose the file, then paste the checksum shown on the page you got it from.</p>
+      <label class="drop"><input type="file" id="check-file" aria-label="File to check"><span id="check-name" data-prompt="Drop a file here, or click to choose one">Drop a file here, or click to choose one</span></label>
+      <details><summary>Or check some text instead</summary>
+        <textarea id="check-text" aria-label="Text to check"></textarea>
+      </details>
+      <label class="field"><span>Expected checksum <small>(optional)</small></span><input type="text" id="check-expected" autocomplete="off" spellcheck="false"></label>
+      <div class="out" id="check-out" aria-live="polite"></div>
     </section>
 
-    <section role="tabpanel" id="p-enc" aria-labelledby="tab-enc" hidden>
-      <h2>Encrypt</h2>
-      <p>AES-256-GCM with a key derived from your password (PBKDF2, 210,000 rounds). To decrypt, paste the base64 output back in with the same password.</p>
-      <label class="field"><span>Text or ciphertext</span><textarea id="enc-in">my secret message</textarea></label>
-      <label class="field"><span>Password</span><input type="password" id="enc-pw" value="correct horse" autocomplete="off"></label>
+    <section role="tabpanel" id="p-lock" aria-labelledby="tab-lock" hidden>
+      <h2>Lock a message</h2>
+      <p>Protect a message or a file with a password. Only someone with the same password can unlock it, and a forgotten password can't be recovered.</p>
+      <label class="field"><span>Message, or locked text to unlock</span><textarea id="enc-in"></textarea></label>
+      <label class="drop"><input type="file" id="lock-file" aria-label="File to lock or unlock"><span id="lock-name" data-prompt="Or drop a file here to lock or unlock it">Or drop a file here to lock or unlock it</span></label>
+      <label class="field"><span>Password</span><input type="password" id="enc-pw" autocomplete="off"></label>
       <div class="actions">
-        <button class="primary" id="enc-btn">Encrypt</button>
-        <button class="secondary" id="dec-btn">Decrypt</button>
+        <button class="primary" id="enc-btn">Lock</button>
+        <button class="secondary" id="dec-btn">Unlock</button>
+        <button class="secondary" id="lock-clear" hidden>Remove file</button>
         <button class="secondary" id="enc-use" hidden>Move result to input</button>
       </div>
       <div class="out" id="enc-out" aria-live="polite"></div>
     </section>
 
-    <section role="tabpanel" id="p-keys" aria-labelledby="tab-keys" hidden>
-      <h2>Keys</h2>
-      <p>Generate a fresh key. Secret keys come as hex and base64, key pairs as PEM (SPKI public, PKCS#8 private).</p>
-      <fieldset class="choice"><legend>Key type</legend><div class="opts">
-        <label><input type="radio" name="key-alg" value="AES-GCM-256" checked><span>AES-GCM 256</span></label>
-        <label><input type="radio" name="key-alg" value="HMAC-SHA-256"><span>HMAC SHA-256</span></label>
-        <label><input type="radio" name="key-alg" value="RSA-OAEP-2048"><span>RSA-OAEP 2048</span></label>
-        <label><input type="radio" name="key-alg" value="RSA-PSS-2048"><span>RSA-PSS 2048</span></label>
-        <label><input type="radio" name="key-alg" value="ECDSA-P-256"><span>ECDSA P-256</span></label>
-        <label><input type="radio" name="key-alg" value="Ed25519"><span>Ed25519</span></label>
-      </div></fieldset>
-      <div class="actions"><button class="primary" id="key-btn">Generate key</button></div>
-      <div class="out" id="key-out" aria-live="polite"></div>
+    <section role="tabpanel" id="p-sign" aria-labelledby="tab-sign" hidden>
+      <h2>Sign &amp; verify</h2>
+      <p>A signature proves a message came from you and wasn't changed. You sign with your private key; anyone can check with your public key.</p>
+      <div class="actions"><button class="secondary" id="sig-gen">Make a key pair</button></div>
+      <label class="field"><span>Private key <small>(needed to sign, keep it secret)</small></span><textarea id="sig-priv" spellcheck="false"></textarea></label>
+      <label class="field"><span>Public key <small>(needed to verify, safe to share)</small></span><textarea id="sig-pub" spellcheck="false"></textarea></label>
+      <label class="field"><span>Message</span><textarea id="sig-msg"></textarea></label>
+      <label class="field"><span>Signature</span><input type="text" id="sig-sig" autocomplete="off" spellcheck="false"></label>
+      <div class="actions">
+        <button class="primary" id="sig-sign">Sign</button>
+        <button class="secondary" id="sig-verify">Verify</button>
+      </div>
+      <div class="out" id="sig-out" aria-live="polite"></div>
     </section>
 
-    <section role="tabpanel" id="p-test" aria-labelledby="tab-test" hidden>
-      <h2>Self-test</h2>
-      <p>Checks this browser against published test vectors, encryption round-trips and signature verification.</p>
-      <div class="actions"><button class="primary" id="test-btn">Run tests</button></div>
-      <div class="out" id="test-out" aria-live="polite"></div>
+    <section role="tabpanel" id="p-conv" aria-labelledby="tab-conv" hidden>
+      <h2>Convert</h2>
+      <p>The same data written three ways. Type in any box and the other two follow.</p>
+      <label class="field"><span>Text</span><textarea id="conv-text"></textarea></label>
+      <label class="field"><span>Hex</span><textarea id="conv-hex" spellcheck="false"></textarea></label>
+      <label class="field"><span>Base64</span><textarea id="conv-b64" spellcheck="false"></textarea></label>
+      <div class="out" id="conv-out" aria-live="polite"></div>
+    </section>
+
+    <section role="tabpanel" id="p-adv" aria-labelledby="tab-adv" hidden>
+      <h2>Advanced</h2>
+      <p>For people who want to choose the algorithm themselves.</p>
+
+      <div class="group">
+        <h3>Hash</h3>
+        <p>Get the digest of some text, or an HMAC if you add a key. Compare checks Web Crypto against a second, independent implementation.</p>
+        <label class="field"><span>Text</span><textarea id="hash-in">hello world</textarea></label>
+        <fieldset class="choice"><legend>Algorithm</legend><div class="opts">
+          <label><input type="radio" name="hash-alg" value="SHA-256" checked><span>SHA-256</span></label>
+          <label><input type="radio" name="hash-alg" value="SHA-384"><span>SHA-384</span></label>
+          <label><input type="radio" name="hash-alg" value="SHA-512"><span>SHA-512</span></label>
+          <label><input type="radio" name="hash-alg" value="SHA-1"><span>SHA-1</span></label>
+          <label><input type="radio" name="hash-alg" value="MD5"><span>MD5</span></label>
+        </div></fieldset>
+        <label class="field"><span>HMAC key <small>(optional)</small></span><input type="text" id="hmac-key" autocomplete="off"></label>
+        <div class="actions">
+          <button class="primary" id="hash-btn">Hash</button>
+          <button class="secondary" id="cross-btn">Compare implementations</button>
+        </div>
+        <div class="out" id="hash-out" aria-live="polite"></div>
+      </div>
+
+      <div class="group">
+        <h3>Keys</h3>
+        <p>Generate a fresh key. Secret keys come as hex and base64, key pairs as PEM (SPKI public, PKCS#8 private).</p>
+        <fieldset class="choice"><legend>Key type</legend><div class="opts">
+          <label><input type="radio" name="key-alg" value="AES-GCM-256" checked><span>AES-GCM 256</span></label>
+          <label><input type="radio" name="key-alg" value="HMAC-SHA-256"><span>HMAC SHA-256</span></label>
+          <label><input type="radio" name="key-alg" value="RSA-OAEP-2048"><span>RSA-OAEP 2048</span></label>
+          <label><input type="radio" name="key-alg" value="RSA-PSS-2048"><span>RSA-PSS 2048</span></label>
+          <label><input type="radio" name="key-alg" value="ECDSA-P-256"><span>ECDSA P-256</span></label>
+          <label><input type="radio" name="key-alg" value="Ed25519"><span>Ed25519</span></label>
+        </div></fieldset>
+        <div class="actions"><button class="primary" id="key-btn">Generate key</button></div>
+        <div class="out" id="key-out" aria-live="polite"></div>
+      </div>
+
+      <div class="group">
+        <h3>Self-test</h3>
+        <p>Checks this browser against published test vectors, lock and unlock round-trips and signature verification.</p>
+        <div class="actions"><button class="primary" id="test-btn">Run tests</button></div>
+        <div class="out" id="test-out" aria-live="polite"></div>
+      </div>
     </section>
   </main>
 </div>
