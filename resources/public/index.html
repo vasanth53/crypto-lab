@@ -9,17 +9,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #E6E9ED; --panel: #FBFCFD; --ink: #18212B; --muted: #5A6673; --rule: #CBD2D9;
-    --accent: #2B3FD6; --accent-ink: #FFFFFF; --ok: #1F7A4D; --bad: #B42318; --well: #F0F2F5;
+    color-scheme: light dark;
+    --bg: light-dark(#E6E9ED, #12171D); --panel: light-dark(#FBFCFD, #1A2129); --ink: light-dark(#18212B, #E4E8EC);
+    --muted: light-dark(#5A6673, #93A0AD); --rule: light-dark(#CBD2D9, #2E3843);
+    --accent: light-dark(#2B3FD6, #8C9BFF); --accent-ink: light-dark(#FFFFFF, #0E1430);
+    --ok: light-dark(#1F7A4D, #4CC38A); --bad: light-dark(#B42318, #F97066); --well: light-dark(#F0F2F5, #141A21);
     --sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
     --mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #12171D; --panel: #1A2129; --ink: #E4E8EC; --muted: #93A0AD; --rule: #2E3843;
-      --accent: #8C9BFF; --accent-ink: #0E1430; --ok: #4CC38A; --bad: #F97066; --well: #141A21;
-    }
-  }
+  :root[data-theme=light] { color-scheme: light; }
+  :root[data-theme=dark] { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--sans); }
 
@@ -35,7 +34,8 @@
     padding: 9px 12px; border-left: 3px solid transparent; cursor: pointer;
   }
   [role=tab]:hover { color: var(--ink); }
-  [role=tab][aria-selected=true] { color: var(--ink); border-left-color: var(--accent); }
+  [role=tab][aria-selected=true] { color: var(--ink); border-left-color: var(--accent); background: var(--panel); }
+  .theme { margin-top: 12px; padding: 4px 10px; font-size: 13px; }
   .rail .fine { margin-top: auto; font-size: 13px; color: var(--muted); line-height: 1.45; }
 
   /* workspace */
@@ -60,8 +60,11 @@
     border: 2px dashed var(--rule); border-radius: 6px; color: var(--muted); overflow-wrap: anywhere;
   }
   .drop:hover { border-color: var(--ink); color: var(--ink); }
+  .drop.over { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
   .drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  .check { display: block; margin: -12px 0 20px; font-size: 14px; color: var(--muted); }
+  #p-sign:has([value=sign]:checked) .verify-only, #p-sign:has([value=verify]:checked) .sign-only { display: none; }
   details { margin-bottom: 20px; }
   summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-bottom: 8px; }
   h3 { font-size: 20px; margin: 0 0 6px; }
@@ -82,6 +85,7 @@
   button { font: 600 15px var(--sans); cursor: pointer; border-radius: 4px; }
   .primary { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); padding: 9px 18px; }
   .secondary { background: transparent; color: var(--ink); border: 1px solid var(--rule); padding: 9px 18px; }
+  .primary:hover { filter: brightness(1.12); }
   .secondary:hover { border-color: var(--ink); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -104,7 +108,13 @@
   .note.bad::before { content: "✗"; color: var(--bad); }
   .note.bad { color: var(--bad); }
   .note.busy { color: var(--muted); }
-  #test-out .note:first-child { font-weight: 700; font-size: 18px; margin-bottom: 18px; }
+  /* the first line of a result is the verdict, so it gets a banner */
+  .out > .note:first-child:is(.ok, .bad) {
+    --c: var(--ok); padding: 12px 14px 12px 42px; margin-bottom: 18px; font-weight: 700; font-size: 18px;
+    border-left: 4px solid var(--c); border-radius: 4px; background: color-mix(in srgb, var(--c) 12%, transparent);
+  }
+  .out > .note.bad:first-child { --c: var(--bad); }
+  .out > .note:first-child:is(.ok, .bad)::before { left: 12px; }
 
   @media (max-width: 760px) {
     .app { grid-template-columns: minmax(0, 1fr); } /* 0 minimum, so the tab row scrolls instead of widening the page */
@@ -123,6 +133,7 @@
     <div>
       <h1 class="brand">Crypto Lab</h1>
       <p>Check downloads, lock messages and sign things, right in your browser.</p>
+      <button class="secondary theme" id="theme-btn">Light / dark</button>
     </div>
     <div role="tablist" aria-label="Tools" aria-orientation="vertical">
       <button role="tab" id="tab-check" aria-controls="p-check" aria-selected="true">Check a file</button>
@@ -152,6 +163,7 @@
       <label class="field"><span>Message, or locked text to unlock</span><textarea id="enc-in"></textarea></label>
       <label class="drop"><input type="file" id="lock-file" aria-label="File to lock or unlock"><span id="lock-name" data-prompt="Or drop a file here to lock or unlock it">Or drop a file here to lock or unlock it</span></label>
       <label class="field"><span>Password</span><input type="password" id="enc-pw" autocomplete="off"></label>
+      <label class="check"><input type="checkbox" id="pw-show"> Show password</label>
       <div class="actions">
         <button class="primary" id="enc-btn">Lock</button>
         <button class="secondary" id="dec-btn">Unlock</button>
@@ -164,14 +176,18 @@
     <section role="tabpanel" id="p-sign" aria-labelledby="tab-sign" hidden>
       <h2>Sign &amp; verify</h2>
       <p>A signature proves a message came from you and wasn't changed. You sign with your private key; anyone can check with your public key.</p>
-      <div class="actions"><button class="secondary" id="sig-gen">Make a key pair</button></div>
-      <label class="field"><span>Private key <small>(needed to sign, keep it secret)</small></span><textarea id="sig-priv" spellcheck="false"></textarea></label>
+      <fieldset class="choice"><legend>What do you want to do?</legend><div class="opts">
+        <label><input type="radio" name="sig-mode" value="sign" checked><span>Sign a message</span></label>
+        <label><input type="radio" name="sig-mode" value="verify"><span>Check a signature</span></label>
+      </div></fieldset>
+      <div class="actions sign-only"><button class="secondary" id="sig-gen">Make a key pair</button></div>
+      <label class="field sign-only"><span>Private key <small>(needed to sign, keep it secret)</small></span><textarea id="sig-priv" spellcheck="false"></textarea></label>
       <label class="field"><span>Public key <small>(needed to verify, safe to share)</small></span><textarea id="sig-pub" spellcheck="false"></textarea></label>
       <label class="field"><span>Message</span><textarea id="sig-msg"></textarea></label>
       <label class="field"><span>Signature</span><input type="text" id="sig-sig" autocomplete="off" spellcheck="false"></label>
       <div class="actions">
-        <button class="primary" id="sig-sign">Sign</button>
-        <button class="secondary" id="sig-verify">Verify</button>
+        <button class="primary sign-only" id="sig-sign">Sign</button>
+        <button class="primary verify-only" id="sig-verify">Verify</button>
       </div>
       <div class="out" id="sig-out" aria-live="polite"></div>
     </section>

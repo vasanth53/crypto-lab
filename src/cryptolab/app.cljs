@@ -69,7 +69,29 @@
   (doseq [^js t (js/Array.from (.querySelectorAll js/document "[role=tab]"))]
     (let [on (= t tab)]
       (.setAttribute t "aria-selected" (str on))
-      (set! (.-hidden ($ (.getAttribute t "aria-controls"))) (not on)))))
+      (set! (.-hidden ($ (.getAttribute t "aria-controls"))) (not on))))
+  (.replaceState js/history nil "" (str "#" (subs (.-id tab) 4)))) ; tab-check -> #check, so a reload or link lands here
+
+(defn tab-key [^js e]
+  (when-let [^js t (.closest (.-target e) "[role=tab]")]
+    (when-let [^js n (case (.-key e)
+                       ("ArrowDown" "ArrowRight") (or (.-nextElementSibling t) (.-firstElementChild (.-parentNode t)))
+                       ("ArrowUp" "ArrowLeft") (or (.-previousElementSibling t) (.-lastElementChild (.-parentNode t)))
+                       nil)]
+      (.preventDefault e)
+      (.focus n)
+      (select-tab! n))))
+
+;; ---- theme ----
+(def root (.-documentElement js/document))
+(defn theme []
+  (or (.getAttribute root "data-theme")
+      (if (.-matches (js/matchMedia "(prefers-color-scheme: dark)")) "dark" "light")))
+(defn stored-theme [] (try (.getItem js/localStorage "theme") (catch :default _ nil)))
+(defn flip-theme! []
+  (let [t (if (= "dark" (theme)) "light" "dark")]
+    (.setAttribute root "data-theme" t)
+    (try (.setItem js/localStorage "theme" t) (catch :default _ nil))))
 
 ;; ---- files ----
 (defn size-label [n]
@@ -207,6 +229,17 @@
                          (into [{:note (str n " of " (count ran) " tests passed") :ok (= n (count ran))}] rs)))))))
 
 (defn init []
+  (when-let [t (stored-theme)] (.setAttribute root "data-theme" t))
+  (when-let [t ($ (str "tab-" (subs (.-hash js/location) 1)))] (select-tab! t))
+  (on "theme-btn" "click" flip-theme!)
+  (.addEventListener js/document "keydown" tab-key)
+  ;; the file input fills each drop zone, so drag events land on it
+  (doseq [ev ["dragenter" "dragover" "dragleave" "drop"]]
+    (.addEventListener js/document ev
+                       (fn [^js e]
+                         (when-let [^js d (.closest (.-target e) ".drop")]
+                           (.toggle (.-classList d) "over" (contains? #{"dragenter" "dragover"} ev))))))
+  (on "pw-show" "change" #(set! (.-type ($ "enc-pw")) (if (.-checked ($ "pw-show")) "text" "password")))
   (.addEventListener js/document "click"
                      (fn [^js e]
                        (when-let [b (.closest (.-target e) ".copy")] (copy! b))
